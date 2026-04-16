@@ -43,10 +43,12 @@ const io = new Server(server, {
 });
 
 const DRIVERS_FILE = path.join(__dirname, 'data', 'drivers.json');
+const STOPS_FILE = path.join(__dirname, 'data', 'stops.json');
 
 // In-memory storage
 let vehiclePositions = {};
 let drivers = [];
+let stops = [];
 
 // Persistence helpers
 async function loadDrivers() {
@@ -59,6 +61,16 @@ async function loadDrivers() {
   }
 }
 
+async function loadStops() {
+  try {
+    const data = await fs.readFile(STOPS_FILE, 'utf8');
+    stops = JSON.parse(data);
+  } catch (error) {
+    stops = [];
+    await saveStops();
+  }
+}
+
 async function saveDrivers() {
   try {
     await fs.writeFile(DRIVERS_FILE, JSON.stringify(drivers, null, 2));
@@ -67,13 +79,23 @@ async function saveDrivers() {
   }
 }
 
+async function saveStops() {
+  try {
+    await fs.writeFile(STOPS_FILE, JSON.stringify(stops, null, 2));
+  } catch (error) {
+    console.error('Error saving stops:', error);
+  }
+}
+
 loadDrivers();
+loadStops();
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
   socket.emit('initial_positions', vehiclePositions);
   socket.emit('drivers_list', drivers);
+  socket.emit('stops_list', stops);
 
   // CRUD Events
   socket.on('create_driver', async (newDriver) => {
@@ -93,6 +115,20 @@ io.on('connection', (socket) => {
     drivers = drivers.filter(d => d.id !== driverId);
     await saveDrivers();
     io.emit('drivers_list', drivers);
+  });
+  
+  // Stops Events
+  socket.on('create_stop', async (newStop) => {
+    const stop = { ...newStop, id: Date.now().toString() };
+    stops.push(stop);
+    await saveStops();
+    io.emit('stops_list', stops);
+  });
+
+  socket.on('delete_stop', async (stopId) => {
+    stops = stops.filter(s => s.id !== stopId);
+    await saveStops();
+    io.emit('stops_list', stops);
   });
 
   socket.on('update_location', (data) => {
