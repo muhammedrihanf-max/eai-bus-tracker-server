@@ -44,12 +44,15 @@ const io = new Server(server, {
 
 const DRIVERS_FILE = path.join(__dirname, 'data', 'drivers.json');
 const STOPS_FILE = path.join(__dirname, 'data', 'stops.json');
+const LOGS_FILE = path.join(__dirname, 'data', 'overspeed_logs.json');
 
 // In-memory storage
 let vehiclePositions = {};
 let vehiclePaths = {}; // Stores arrays of {lat, lng}
 let drivers = [];
 let stops = [];
+let overspeedLogs = [];
+let socketToVehicle = {};
 
 // Persistence helpers
 async function loadDrivers() {
@@ -88,8 +91,27 @@ async function saveStops() {
   }
 }
 
+async function loadLogs() {
+  try {
+    const data = await fs.readFile(LOGS_FILE, 'utf8');
+    overspeedLogs = JSON.parse(data);
+  } catch (error) {
+    overspeedLogs = [];
+    await saveLogs();
+  }
+}
+
+async function saveLogs() {
+  try {
+    await fs.writeFile(LOGS_FILE, JSON.stringify(overspeedLogs, null, 2));
+  } catch (error) {
+    console.error('Error saving logs:', error);
+  }
+}
+
 loadDrivers();
 loadStops();
+loadLogs();
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
@@ -97,6 +119,7 @@ io.on('connection', (socket) => {
   socket.emit('initial_positions', vehiclePositions);
   socket.emit('drivers_list', drivers);
   socket.emit('stops_list', stops);
+  socket.emit('overspeed_logs', overspeedLogs);
 
   // CRUD Events
   socket.on('create_driver', async (newDriver) => {
@@ -141,9 +164,29 @@ io.on('connection', (socket) => {
       timestamp: timestamp || Date.now(),
       speed: speed || 0,
       driver_name: driver_name || `Driver ${vehicle_id}`,
+      phone: data.phone || '', 
       role: role || 'driver',
       vehicle_id
     };
+
+    // Log Overspeeding
+    if (speed > 80 && role === 'driver') {
+      const logEntry = {
+        driver_name: driver_name || vehicle_id,
+        vehicle_id,
+        speed,
+        lat, lng,
+        timestamp: Date.now()
+      };
+      
+      // Prevent duplicate logs (within 1 minute)
+      const lastLog = overspeedLogs.find(l => l.vehicle_id === vehicle_id && (Date.now() - l.timestamp < 60000));
+      if (!lastLog) {
+        overspeedLogs.push(logEntry);
+        saveLogs();
+        io.emit('overspeed_logs', overspeedLogs);
+      }
+    }
 
     // Update Path (Traveled Trail)
     if (!vehiclePaths[vehicle_id]) {
@@ -165,6 +208,8 @@ io.on('connection', (socket) => {
       ...vehiclePositions[vehicle_id],
       path: currentPath
     });
+
+    socketToVehicle[socket.id] = vehicle_id;
   });
 
   socket.on('logout', (vehicleId) => {
@@ -177,6 +222,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    const vehicleId = socketToVehicle[socket.id];
+    if (vehicleId) {
+      delete vehiclePositions[vehicleId];
+      delete vehiclePaths[vehicleId];
+      io.emit('vehicle_removed', vehicleId);
+      delete socketToVehicle[socket.id];
+      console.log(`Socket disconnected: Vehicle ${vehicleId} removed.`);
+    }
     console.log('User disconnected:', socket.id);
   });
 });
