@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
+const bcrypt = require('bcryptjs');
 
 const app = express();
 app.use(cors());
@@ -12,6 +13,25 @@ app.use(express.json());
 // REST endpoint so login page can validate driver credentials
 app.get('/api/drivers', (req, res) => {
   res.json(drivers);
+});
+
+// Secure Admin Login
+const ADMIN_HASH = process.env.ADMIN_PASSWORD_HASH || '$2b$10$VlAB6R5lplQkA9LDCyXu0ePWv71y5mH/KMU68W0Dn36QU8yuPnanm';
+
+app.post('/api/admin/login', async (req, res) => {
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ error: 'Password required' });
+
+  try {
+    const match = await bcrypt.compare(password, ADMIN_HASH);
+    if (match) {
+      res.json({ success: true, role: 'admin', name: 'Admin' });
+    } else {
+      res.status(401).json({ error: 'Invalid admin password' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Authentication error' });
+  }
 });
 
 const server = http.createServer(app);
