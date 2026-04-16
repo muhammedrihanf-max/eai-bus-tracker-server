@@ -47,6 +47,7 @@ const STOPS_FILE = path.join(__dirname, 'data', 'stops.json');
 
 // In-memory storage
 let vehiclePositions = {};
+let vehiclePaths = {}; // Stores arrays of {lat, lng}
 let drivers = [];
 let stops = [];
 
@@ -144,14 +145,34 @@ io.on('connection', (socket) => {
       vehicle_id
     };
 
-    io.emit('location_updated', vehiclePositions[vehicle_id]);
+    // Update Path (Traveled Trail)
+    if (!vehiclePaths[vehicle_id]) {
+      vehiclePaths[vehicle_id] = [];
+    }
+    
+    // Only add if different from last point
+    const currentPath = vehiclePaths[vehicle_id];
+    const lastPoint = currentPath[currentPath.length - 1];
+    if (!lastPoint || lastPoint[0] !== lat || lastPoint[1] !== lng) {
+      currentPath.push([lat, lng]);
+      // Limit path length to last 100 points
+      if (currentPath.length > 100) {
+        currentPath.shift();
+      }
+    }
+
+    io.emit('location_updated', {
+      ...vehiclePositions[vehicle_id],
+      path: currentPath
+    });
   });
 
   socket.on('logout', (vehicleId) => {
-    if (vehicleId && vehiclePositions[vehicleId]) {
+    if (vehicleId) {
       delete vehiclePositions[vehicleId];
+      delete vehiclePaths[vehicleId];
       io.emit('vehicle_removed', vehicleId);
-      console.log(`Vehicle ${vehicleId} logged out and removed from map.`);
+      console.log(`Vehicle ${vehicleId} logged out and path cleared.`);
     }
   });
 
