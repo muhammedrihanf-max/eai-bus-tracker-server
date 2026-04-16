@@ -147,6 +147,14 @@ io.on('connection', (socket) => {
     io.emit('location_updated', vehiclePositions[vehicle_id]);
   });
 
+  socket.on('logout', (vehicleId) => {
+    if (vehicleId && vehiclePositions[vehicleId]) {
+      delete vehiclePositions[vehicleId];
+      io.emit('vehicle_removed', vehicleId);
+      console.log(`Vehicle ${vehicleId} logged out and removed from map.`);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
